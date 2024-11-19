@@ -1,28 +1,29 @@
 """A few miscellaneous scripts needed for primer map to function"""
 
-# TODO this is only roughly translated, need to validate the conversion
 import re
 
+from pm_classes import RestrictionSite, RestrictionSiteCollection
 
-def check_genetic_code(array_of_patterns):
-    z = 0
+
+def check_genetic_code(patterns: list[str]) -> bool:
+
     codon = ""
     one_match = False
     test_sequence = "gggggaggtggcgaggaagatgacgtggtagttgtcgcggcagctgccaggagaagtagcaagaaaaataacatgataattatcacgacaactacctggtgatgttgctagtaatattacttgttatttttctcgtcatcttcccggcgacgtcgccagcaacatcacctgctacttctcccgccacctccc"
-    while z < len(array_of_patterns):
-        if not re.search(r"^\s*/[a-zA-Z\|\[\]]+/=[a-zA-Z\*]", array_of_patterns[z]):
+    for pattern in patterns:
+        if not re.search(r"^\s*/[a-zA-Z\|\[\]]+/=[a-zA-Z\*]", pattern):
             print("Genetic code error: one or more patterns have been entered incorrectly.")
             return False
-        if not more_expression_check(array_of_patterns[z]):
-            print("Genetic code error: one or more patterns have been entered incorrectly.")
-            return False
-        z += 1
 
-    genetic_code_match_result = [None] * len(array_of_patterns)
-    genetic_code_match_exp = [None] * len(array_of_patterns)
-    for j in range(len(array_of_patterns)):
-        genetic_code_match_exp[j] = re.compile(array_of_patterns[j].split("=")[0][1:-1], re.IGNORECASE)
-        genetic_code_match_result[j] = array_of_patterns[j].split("=")[1]
+        if not more_expression_check(pattern):
+            print("Genetic code error: one or more patterns have been entered incorrectly.")
+            return False
+
+    genetic_code_match_result = [None] * len(patterns)
+    genetic_code_match_exp = [None] * len(patterns)
+    for j in range(len(patterns)):
+        genetic_code_match_exp[j] = re.compile(patterns[j].split("=")[0][1:-1], re.IGNORECASE)
+        genetic_code_match_result[j] = patterns[j].split("=")[1]
 
     for i in range(0, len(test_sequence) - 2, 3):
         codon = test_sequence[i : i + 3]
@@ -40,16 +41,18 @@ def check_genetic_code(array_of_patterns):
     return True
 
 
-def check_rest_patterns(array_of_patterns):
-    z = 0
-    while z < len(array_of_patterns):
-        if re.search(r"^\s*/[acgturyswkmbdhvn\[\]]+/\s+\([^/]+\)\d+", array_of_patterns[z], re.IGNORECASE) is None:
+def check_rest_patterns(patterns: list[str]) -> bool:
+
+    for pattern in patterns:
+
+        if re.search(r"^\s*/[acgturyswkmbdhvn\[\]]+/\s+\([^/]+\)\d+", pattern, re.IGNORECASE) is None:
             print("One or more patterns have been entered incorrectly.")
             return False
-        if not more_expression_check(array_of_patterns[z]):
+
+        if not more_expression_check(pattern):
             print("One or more patterns have been entered incorrectly.")
             return False
-        z += 1
+
     return True
 
 
@@ -70,7 +73,51 @@ def convert_degenerates(sequence: str) -> str:
     return sequence
 
 
-def more_expression_check(pattern):
+def find_restriction_sites(
+    sequence: str, array_of_items: list[str], dna_conformation: str
+) -> RestrictionSiteCollection:
+    look_ahead: int = 50
+    lower_limit: int = 0
+    upper_limit: int = len(sequence)
+    shift_value: int = 0
+    cut_distance: int = 0
+    match_exp: re.Pattern = None
+    match_position: int = 0
+    label: str = ""
+    times_found: int = 0
+    temp_array: list[RestrictionSite] = []
+
+    rs_collection = RestrictionSiteCollection()
+
+    if dna_conformation == "circular":
+        shift_value = len(sequence[:look_ahead])
+        sequence = sequence[-look_ahead:] + sequence + sequence[:look_ahead]
+        lower_limit = 0 + shift_value
+        upper_limit += shift_value
+
+    for item in array_of_items:
+        match_exp = re.compile(item.split("/")[1], re.IGNORECASE)
+        cut_distance = int(re.search(r"\)\D*(\d+)", item).group(1))
+        label = re.search(r"\(([^\(]+)\)", item).group(1)
+
+        for match in match_exp.finditer(sequence):
+            match_position = match.start() - cut_distance
+            if lower_limit <= match_position < upper_limit:
+                times_found += 1
+                temp_array.append(
+                    RestrictionSite(f"{label} {match_position - shift_value + 1}", match_position - shift_value)
+                )
+
+        for site in temp_array:
+            site.set_cut_count(times_found)
+            rs_collection.add_site(site)
+        times_found = 0
+        temp_array = []
+
+    return rs_collection
+
+
+def more_expression_check(pattern: str) -> bool:
     if (
         re.search(r"\[[A-Za-z\|]*\[", pattern)
         or re.search(r"\][A-Za-z\|]*\]", pattern)
