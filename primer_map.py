@@ -10,40 +10,84 @@
 """
 
 import argparse
-import os
 import re
-import sys
 
+from pm_classes import Primer
+from pm_utils import (
+    check_genetic_code,
+    check_rest_patterns,
+    complement,
+    convert_degenerates,
+    find_matches,
+    find_restriction_sites,
+    reverse,
+    validate_sequence,
+    write_restriction_sites,
+)
 from sms_codes import get_genetic_code_string
 from sms_restriction import get_restriction_sites
-from utils import check_genetic_code, check_rest_patterns, convert_degenerates
-
-
-class Primer:
-    def __init__(self, sequence, regex, name):
-        self.sequence = sequence
-        self.regex = regex
-        self.name = name
-        self.hasForwardMatch = False
-        self.hasReverseMatch = False
 
 
 def parse_args() -> argparse.ArgumentParser:
+    """
+    Simple argument parser for the primer map function.
+
+    :param None:
+    :return: args
+    :rtype: argparse.Namespace
+    """
+
     parser = argparse.ArgumentParser()
-    parser.add_argument("-t", "--target", type=str, required=True, help="Target sequence")
-    parser.add_argument("-g", "--genetic_code", type=str, default="standard", required=False, help="Genetic code")
-    parser.add_argument("-c", "--color", action="store_true", help="Color output")
-    args = parser.parse_args()
-    return args
+    parser.add_argument("-p", "--primers", type=str, required=True, help="Comma separated list of primers to map.")
+    parser.add_argument(
+        "-t", "--target", type=str, required=True, help="Reference sequence to map the primers against."
+    )
+    parser.add_argument(
+        "-g",
+        "--genetic-code",
+        type=str,
+        default="standard",
+        required=False,
+        help="!NOT IMPLEMENTED! Organism to use as the reference for codon translation.",
+    )
+    parser.add_argument(
+        "-r",
+        "--rs-sites",
+        action="store_true",
+        required=False,
+        help="!NOT IMPLEMENTED! Whether to show restriction sites or not.",
+    )
+    parser.add_argument(
+        "--topology", type=str, default="linear", required=False, help="Whether the sequence is linear or circular"
+    )
+    parser.add_argument(
+        "--bp-per-line", type=int, default=100, required=False, help="Number of base pairs to display per line."
+    )
+    parser.add_argument(
+        "--reading-frame", type=int, default=0, required=False, help="!NOT IMPLEMENTED! Reading frame(s) to display."
+    )
+    parser.add_argument("-c", "--color", action="store_true", help="!NOT IMPLEMENTED! Color output")
+
+    return parser.parse_args()
 
 
 def primer_map(args: argparse.Namespace) -> None:
-    fasta_seq = ""
-    title = ""
-    restriction_site_collection = None
+    """
+    Primer Map driver function
+
+    :param args: Arguments provided by command line
+    :type args: argparse.Namespace
+    :return: None
+    """
+    try:
+        fasta_seq = validate_sequence(args.target)
+    except ValueError as e:
+        raise ValueError(f"Invalid sequence: {e}")
+    fasta_title = ""
+    rs_collection = None
     forward_matches = None
     reverse_matches = None
-    is_color = args.color
+    # is_color = args.color
 
     genetic_code = get_genetic_code_string(args.genetic_code)
     restriction_sites = get_restriction_sites()
@@ -54,10 +98,9 @@ def primer_map(args: argparse.Namespace) -> None:
     if not check_rest_patterns(restriction_sites):
         return
 
-    primers = args.primers.split(",")
     new_primers = []
     re_pattern = re.compile(r"\(([^\(]+)\)\s*([A-Za-z]+)")
-    for primer in primers:
+    for primer in args.primers.split(","):
         match_array = re_pattern.search(primer)
         if match_array:
             primer_name = match_array.group(1)
@@ -80,33 +123,28 @@ def primer_map(args: argparse.Namespace) -> None:
         output_window.args.write("\n")
     """
 
-    fasta = args.target
-    # fasta_seq = remove_non_dna(fasta)
-    open_pre()
-    output_window.args.write(
-        get_info_from_title_and_sequence_and_topology(
-            title, fasta_seq, args.forms[0].elements[9].options[args.forms[0].elements[9].selectedIndex].value
-        )
+    print(
+        f'Results for {args.topology} {len(fasta_seq)} residue sequence "{fasta_title}" starting "{fasta_seq[:10]}"\n'
     )
 
-    if args.forms[0].elements[8].options[args.forms[0].elements[8].selectedIndex].value == "shown":
-        restriction_site_collection = find_restriction_sites(
+    if args.rs_sites:
+        rs_collection = find_restriction_sites(
             fasta_seq,
             restriction_sites,
-            args.forms[0].elements[9].options[args.forms[0].elements[9].selectedIndex].value,
+            args.topology,
         )
-        restriction_site_collection.sort_restriction_sites()
+        rs_collection.sort_sites()
 
     forward_matches = find_matches(
         new_primers,
         fasta_seq,
-        args.forms[0].elements[9].options[args.forms[0].elements[9].selectedIndex].value,
+        args.topology,
         False,
     )
     reverse_matches = find_matches(
         new_primers,
         reverse(complement(fasta_seq)),
-        args.forms[0].elements[9].options[args.forms[0].elements[9].selectedIndex].value,
+        args.topology,
         True,
     )
 
@@ -132,21 +170,20 @@ def primer_map(args: argparse.Namespace) -> None:
     layout_primer_map(
         fasta_seq,
         genetic_code,
-        restriction_site_collection,
+        rs_collection,
         forward_matches,
         reverse_matches,
-        args.forms[0].elements[5].options[args.forms[0].elements[5].selectedIndex].value,
-        args.forms[0].elements[6].options[args.forms[0].elements[6].selectedIndex].value,
+        args.bp_per_line,
+        args.reading_frame,
     )
 
     output_window.args.write("\n")
-    close_pre()
 
-    if args.forms[0].elements[8].options[args.forms[0].elements[8].selectedIndex].value == "shown":
+    if args.rs_sites:
         write_restriction_sites(
             fasta_seq,
             restriction_sites,
-            args.forms[0].elements[9].options[args.forms[0].elements[9].selectedIndex].value,
+            args.topology,
         )
         output_window.args.write("<br />\n")
 
@@ -164,9 +201,4 @@ def primer_map(args: argparse.Namespace) -> None:
 
 if __name__ == "__main__":
     args = parse_args()
-
-    assert len(args.target) <= 200000000, f"Input sequence is too long, max length is 200000000, got {len(args.target)}"
-
-    assert [x for x in args.target if x not in "ACGTatcg"], "Input sequence contains invalid characters"
-
     primer_map(args)
