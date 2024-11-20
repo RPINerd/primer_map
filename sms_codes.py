@@ -1,5 +1,9 @@
 """
-    Conversion of the 'sms_genetic_codes.js' module from the SMS source, for use in the primer map tool
+    Conversion of the 'sms_genetic_codes.js' module from the SMS source, for use in the primer map tool.
+
+    Genetic code in this case refers to the resulting amino acid from a given set of 3 nucleotides (a codon).
+
+    In Primer Map, this is only needed if the user wants a reading frame translation to be shown.
 """
 
 
