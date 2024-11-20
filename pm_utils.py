@@ -2,14 +2,21 @@
 
 import re
 
-from pm_classes import RestrictionSite, RestrictionSiteCollection
+from pm_classes import Match, MatchCollection, Primer, RestrictionSite, RestrictionSiteCollection
+
+TRANSTABLE = str.maketrans("ATGCatcguUryRYkmKMbvBVdhDH", "TACGtagcaAyrYRmkMKvbVBhdHD")
 
 
 def check_genetic_code(patterns: list[str]) -> bool:
 
     codon = ""
     one_match = False
-    test_sequence = "gggggaggtggcgaggaagatgacgtggtagttgtcgcggcagctgccaggagaagtagcaagaaaaataacatgataattatcacgacaactacctggtgatgttgctagtaatattacttgttatttttctcgtcatcttcccggcgacgtcgccagcaacatcacctgctacttctcccgccacctccc"
+    test_sequence = """
+        gggggaggtggcgaggaagatgacgtggtagttgtcgcggcagctgccaggagaag\
+        tagcaagaaaaataacatgataattatcacgacaactacctggtgatgttgctagt\
+        aatattacttgttatttttctcgtcatcttcccggcgacgtcgccagcaacatcac\
+        ctgctacttctcccgccacctccc\
+        """
     for pattern in patterns:
         if not re.search(r"^\s*/[a-zA-Z\|\[\]]+/=[a-zA-Z\*]", pattern):
             print("Genetic code error: one or more patterns have been entered incorrectly.")
@@ -56,6 +63,11 @@ def check_rest_patterns(patterns: list[str]) -> bool:
     return True
 
 
+def complement(sequence: str) -> str:
+    return sequence.translate(TRANSTABLE)
+
+
+# TODO switch this to use a maketrans dict
 def convert_degenerates(sequence: str) -> str:
     sequence = sequence.lower()
     sequence = sequence.replace("t", "[TU]")
@@ -73,9 +85,45 @@ def convert_degenerates(sequence: str) -> str:
     return sequence
 
 
-def find_restriction_sites(
-    sequence: str, array_of_items: list[str], dna_conformation: str
-) -> RestrictionSiteCollection:
+def find_matches(primers: list[Primer], sequence: str, topology: str, is_reverse: bool) -> MatchCollection:
+    match_collection = MatchCollection()
+    original_length = len(sequence)
+
+    if topology == "circular":
+        look_ahead = 50
+        shift_value = len(sequence[:look_ahead])
+        upper_limit = len(sequence) + shift_value
+        sequence = sequence[-look_ahead:] + sequence + sequence[:look_ahead]
+        lower_limit = shift_value
+
+        for primer in primers:
+            re_pattern = primer.regex
+            for match in re.finditer(re_pattern, sequence):
+                match_position = match.end()
+                if lower_limit <= match_position < upper_limit:
+                    match_position -= shift_value
+                    if match_position == 0:
+                        match_position = original_length
+                    match_collection.add_match(Match(primer["name"], match.group(0), match_position))
+                    if is_reverse:
+                        primer["has_reverse_match"] = True
+                    else:
+                        primer["has_forward_match"] = True
+    else:
+        for primer in primers:
+            re_pattern = primer.regex
+            for match in re.finditer(re_pattern, sequence):
+                match_position = match.end()
+                match_collection.add_match(Match(primer["name"], match.group(0), match_position))
+                if is_reverse:
+                    primer["has_reverse_match"] = True
+                else:
+                    primer["has_forward_match"] = True
+
+    return match_collection
+
+
+def find_restriction_sites(sequence: str, array_of_items: list[str], topology: str) -> RestrictionSiteCollection:
     look_ahead: int = 50
     lower_limit: int = 0
     upper_limit: int = len(sequence)
@@ -89,7 +137,7 @@ def find_restriction_sites(
 
     rs_collection = RestrictionSiteCollection()
 
-    if dna_conformation == "circular":
+    if topology == "circular":
         shift_value = len(sequence[:look_ahead])
         sequence = sequence[-look_ahead:] + sequence + sequence[:look_ahead]
         lower_limit = 0 + shift_value
@@ -133,3 +181,99 @@ def more_expression_check(pattern: str) -> bool:
     ):
         return False
     return True
+
+
+def reverse(sequence: str) -> str:
+    return sequence[::-1]
+
+
+def right_num(num: int, sequence: str, col_length: int, tab: str) -> str:
+    temp_string = ""
+    num_str = str(num)
+    for _ in range(len(num_str), col_length):
+        temp_string += " "
+    num_str = temp_string + num_str + " "
+    sequence += num_str + tab
+    return sequence
+
+
+def validate_sequence(sequence: str) -> str:
+    """
+    Validates that the provided target sequence is actually DNA, and less than 200,000,000 characters long.
+
+    :param sequence: The target sequence to validate.
+    :type sequence: str
+    :return sequence: The validated sequence.
+    :rtype: str
+    :raises ValueError: If the sequence is empty, too long, or contains invalid characters.
+    """
+
+    sequence = sequence.replace("\n", "").replace("\r", "").replace(" ", "")
+
+    if len(sequence) == 0:
+        raise ValueError("Sequence is empty!")
+    if len(sequence) > 200000000:
+        raise ValueError(f"Sequence is too long! Limit is 200000000 characters (recieved {len(sequence)}).")
+    if re.search(r"[^gatucryswkmbdhvnxGATUCRYSWKMBDHVNX]", sequence):
+        raise ValueError("Sequence contains invalid characters!")
+
+    return sequence
+
+
+def write_restriction_sites(sequence: str, array_of_items: list, topology: str) -> None:
+    # result_array = []
+    look_ahead = 50
+    lower_limit = 0
+    upper_limit = len(sequence)
+    shift_value = 0
+    cut_distance = 0
+    match_exp = None
+    match_position = 0
+    temp_string = ""
+    background_class = ""
+    # match_array = None
+    times_found = 0
+
+    if topology == "circular":
+        shift_value = len(sequence[:look_ahead])
+        sequence = sequence[-look_ahead:] + sequence + sequence[:look_ahead]
+        lower_limit = 0 + shift_value
+        upper_limit = upper_limit + shift_value
+
+    print('<table border="1" width="100%" cellspacing="0" cellpadding="2"><tbody>')
+    print('<tr><td class="title" width="200px">Site:</td><td class="title">Positions:</td></tr>')
+
+    for item in array_of_items:
+        temp_string = "none"
+        background_class = "many"
+        match_exp = re.compile(item.split("/")[1], re.IGNORECASE)
+        cut_distance = int(re.search(r"\)\D*(\d+)", item).group(1))
+
+        for match in match_exp.finditer(sequence):
+            match_position = match.end() - cut_distance
+            if lower_limit <= match_position < upper_limit:
+                times_found += 1
+                temp_string += ", " + str(match_position - shift_value + 1)
+
+            if re.search(r"\d", temp_string):
+                temp_string = temp_string.replace("none, ", "")
+
+            if times_found == 0:
+                background_class = "none"
+            elif times_found == 1:
+                background_class = "one"
+            elif times_found == 2:
+                background_class = "two"
+            elif times_found == 3:
+                background_class = "three"
+            else:
+                background_class = "many"
+
+        site_name = re.search(r"\([^\(]+\)", item).group(0).replace("(", "").replace(")", "")
+        print(
+            f'<tr><td class="{background_class}">{site_name}</td><td class="{background_class}">{temp_string}</td></tr>'
+        )
+
+        times_found = 0
+
+    print("</tbody></table>")
